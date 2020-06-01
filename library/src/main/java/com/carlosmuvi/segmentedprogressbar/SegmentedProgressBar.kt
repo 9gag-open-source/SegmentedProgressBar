@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 import androidx.annotation.ColorInt
 
@@ -15,11 +16,12 @@ class SegmentedProgressBar : View {
 
     private lateinit var containerRectanglePaint: Paint
     private lateinit var fillRectanglePaint: Paint
-    private lateinit var drawingTimer: DrawingTimer
+    private var drawingTimer: DrawingTimer? = null
     private lateinit var properties: PropertiesModel
 
     private var segmentCompletedListener: CompletedSegmentListener? = null
-
+    // Do not use timer
+    private var isUpdateProgressByExternal = false
     constructor(context: Context) : super(context) {
         initView()
     }
@@ -29,8 +31,11 @@ class SegmentedProgressBar : View {
     }
 
     private fun initView(attrs: AttributeSet? = null) {
-        initDrawingTimer()
         initPropertiesModel(attrs)
+        isUpdateProgressByExternal = properties.enableUpdateProgressByExternal
+        if(!properties.enableUpdateProgressByExternal) {
+            initDrawingTimer()
+        }
         containerRectanglePaint = buildContainerRectanglePaint(properties.containerColor)
         fillRectanglePaint = buildFillRectanglePaint(properties.fillColor)
     }
@@ -41,17 +46,40 @@ class SegmentedProgressBar : View {
 
     private fun initDrawingTimer() {
         drawingTimer = DrawingTimer()
-        drawingTimer.setListener { currentTicks, totalTicks ->
+        drawingTimer?.setListener { currentTicks, totalTicks ->
             val segmentWidth = segmentWidth
-
             currentSegmentProgressInPx = currentTicks * segmentWidth / totalTicks
+            Log.d("SegmentProgressBar", "progress in px $currentSegmentProgressInPx")
             if (totalTicks <= currentTicks) {
                 lastCompletedSegment++
                 currentSegmentProgressInPx = 0
             }
-            if (totalTicks == currentTicks) segmentCompletedListener?.onSegmentCompleted(lastCompletedSegment)
+            if (totalTicks == currentTicks) {
+                segmentCompletedListener?.onSegmentCompleted(lastCompletedSegment)
+            }
             invalidate()
         }
+    }
+
+    fun setUpdateProgressByExternal(isUpdateProgressByExternal: Boolean) {
+        this.isUpdateProgressByExternal = isUpdateProgressByExternal
+        if (drawingTimer == null) {
+            initDrawingTimer()
+        }
+    }
+
+    fun updateProgress(percentage: Float) {
+        val segmentWidth = segmentWidth
+        currentSegmentProgressInPx = (percentage * segmentWidth).toInt()
+        Log.d("SegmentProgressBar", "progress in px $currentSegmentProgressInPx")
+        if (percentage >= 1F) {
+            lastCompletedSegment++
+            currentSegmentProgressInPx = 0
+        }
+        if (percentage >= 1F) {
+            segmentCompletedListener?.onSegmentCompleted(lastCompletedSegment)
+        }
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -89,7 +117,7 @@ class SegmentedProgressBar : View {
      * Callback that will be triggered when a segment is filled.
      */
     @Suppress("Unused")
-    fun setCompletedSegmentListener(listener: CompletedSegmentListener) {
+    fun setCompletedSegmentListener(listener: CompletedSegmentListener?) {
         this.segmentCompletedListener = listener
     }
 
@@ -98,8 +126,8 @@ class SegmentedProgressBar : View {
      * @param timeInMilliseconds total time that will take for the segment to fill.
      */
     fun playSegment(timeInMilliseconds: Long) {
-        if (!drawingTimer.isRunning) {
-            drawingTimer.start(timeInMilliseconds)
+        if (!isUpdateProgressByExternal && drawingTimer != null && !drawingTimer!!.isRunning) {
+            drawingTimer?.start(timeInMilliseconds)
         }
     }
 
@@ -109,7 +137,7 @@ class SegmentedProgressBar : View {
     fun incrementCompletedSegments() {
         if (lastCompletedSegment <= properties.segmentCount) {
             currentSegmentProgressInPx = 0
-            drawingTimer.reset()
+            drawingTimer?.reset()
             lastCompletedSegment++
             invalidate()
             segmentCompletedListener?.onSegmentCompleted(lastCompletedSegment)
@@ -119,22 +147,32 @@ class SegmentedProgressBar : View {
     /**
      * If segment filling playing, pauses the progress.
      */
-    fun pause() = drawingTimer.pause()
+    fun pause() {
+        if (!isUpdateProgressByExternal) drawingTimer?.pause()
+    }
 
     /**
      * If segment filling paused, resumes the progress.
      */
-    fun resume() = drawingTimer.resume()
+    fun resume() {
+        if (!isUpdateProgressByExternal) drawingTimer?.resume()
+    }
+
+    fun stopTimer() = drawingTimer?.reset()
 
     /**
      * Resets the current bar state, clearing all the segments.
      */
-    fun reset() = setCompletedSegments(0)
+    fun reset() {
+        if (!isUpdateProgressByExternal) setCompletedSegments(0)
+    }
 
     /**
      * Checks if the current progress bar filling is paused.
      */
-    fun isPaused() = drawingTimer.isPaused
+    fun isPaused() {
+        if (!isUpdateProgressByExternal) drawingTimer?.isPaused
+    }
 
     /**
      * Directly the given number of [completedSegments].
@@ -142,7 +180,7 @@ class SegmentedProgressBar : View {
     fun setCompletedSegments(completedSegments: Int) {
         if (completedSegments <= properties.segmentCount) {
             currentSegmentProgressInPx = 0
-            drawingTimer.reset()
+            drawingTimer?.reset()
             lastCompletedSegment = completedSegments
             invalidate()
         }
